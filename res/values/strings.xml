@@ -1,4 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AppFuncEx</string>
+
+    <!-- Debugging -->
+    <string name="debugging_title">Debugging Page</string>
+    <string name="debugging_supported">Supported</string>
+    <string name="debugging_unsupported">Unsupported</string>
+    <string name="debugging_search_app">Search App</string>
+    <string name="debugging_select_app_prompt">Select an app to see its functions</string>
+    <string name="debugging_functions_for_app">Functions for %1$s:</string>
+    <string name="debugging_invoke">Run</string>
+    <string name="debugging_parameters">Parameters</string>
+    <string name="debugging_required_indicator">*</string>
+    <string name="debugging_expand_function">Expand function</string>
+    <string name="debugging_collapse_function">Collapse function</string>
+    <string name="debugging_disabled">Disabled</string>
+    <string name="debugging_edit">Edit</string>
+    <string name="debugging_execution_result">Execution Result</string>
+    <string name="debugging_confirm">Confirm</string>
+    <string name="debugging_reset">Reset</string>
+    <string name="debugging_error">Error</string>
+    <string name="debugging_success">Success</string>
+    <string name="debugging_set_object">Set params</string>
+    <string name="debugging_item">Item %1$d</string>
+    <string name="debugging_done">Done</string>
+    <string name="debugging_preview">Preview</string>
+    <string name="debugging_reference_not_found">Reference not found: %1$s</string>
+    <string name="debugging_unsupported_type">Unsupported Type: %1$s</string>
+    <string name="debugging_add_item">Add Item</string>
+    <string name="debugging_remove">Remove</string>
+    <string name="debugging_pending_intent_disclaimer">Warning: You should only open the app from trusted source.</string>
+    <string name="debugging_action_required">Action Required</string>
+    <string name="debugging_failed_to_open">Failed to open: %s</string>
+    <string name="debugging_open">Open</string>
+    <string name="debugging_dismiss">Dismiss</string>
+    <string name="debugging_troubleshoot_title">Troubleshoot Missing App</string>
+    <string name="troubleshoot_step_app_support">App Support Check</string>
+    <string name="troubleshoot_app_already_supported">App already supported</string>
+    <string name="troubleshoot_app_already_supported_desc">App is visible in the list and supports AppFunctions.</string>
+    <string name="troubleshoot_app_not_listed">App is not currently listed as having AppFunctions.</string>
+    <string name="troubleshoot_step_service_check">Service Check</string>
+    <string name="troubleshoot_has_service_desc">Found service exposing AppFunctionService.</string>
+    <string name="troubleshoot_no_service_desc">We couldn\'t find any service in your app that handles AppFunctions.\n\nTo fix this, make sure you have:\n1. Added the Jetpack AppFunction library to your dependencies.\n2. Declared a service in your AndroidManifest.xml with an intent-filter for \'android.app.appfunctions.AppFunctionService\'.\n3. Set the service to be exported (android:exported=\"true\").</string>
+    <string name="troubleshoot_step_property_check">Property Check</string>
+    <string name="troubleshoot_has_property_desc">Found \'android.app.appfunctions.v2\' property.</string>
+    <string name="troubleshoot_no_property_desc">Your AppFunctionService is missing the required metadata property.\n\nTo fix this, add a &lt;property&gt; tag inside your &lt;service&gt; declaration in the manifest:\n&lt;property android:name=\"android.app.appfunctions.v2\" android:value=\"your_metadata_file.xml\" /&gt;\n\nThe value should point to the file in your assets folder containing the AppFunction metadata.</string>
+    <string name="troubleshoot_step_asset_check">Asset Check</string>
+    <string name="troubleshoot_has_asset_desc">Found metadata file in assets.</string>
+    <string name="troubleshoot_no_asset_desc">The metadata file \'%1$s\' specified in your manifest property was not found in the app\'s assets.\n\nThis usually means the AppFunction compiler isn\'t set up correctly.\nTo fix this, please check:\n1. Did you add the AppFunction compiler as a KSP dependency?\n2. Did you set the KSP option \'appfunctions:aggregateAppFunctions\' to \'true\'?\n\nPlease refer to the AppFunction integration guideline to make sure the compiler is set up correctly.</string>
+    <string name="troubleshoot_select_app">Select an app</string>
+    <string name="troubleshoot_results_for">Results for %1$s:</string>
+    <string name="troubleshoot_step_final_check">Final Check</string>
+    <string name="troubleshoot_fallback_desc">All checks passed but the app is still not visible. Please capture a bugreport and report the issue.</string>
+    <string name="debugging_copied_value">Copied value of %1$s</string>
+    <string name="debugging_copy_value">Copy value</string>
+
 </resources>

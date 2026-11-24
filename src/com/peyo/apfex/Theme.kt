@@ -5,6 +5,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.font.FontFamily
+
+val GoogleSansCodeFontFamily = FontFamily.Monospace
 
 private val DarkColorScheme = darkColorScheme()
 private val LightColorScheme = lightColorScheme()
