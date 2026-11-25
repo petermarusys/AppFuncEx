@@ -373,11 +373,11 @@ class DebuggingViewModel
                         add(AppSection(R.string.debugging_supported, filteredSupported, true))
                     }
 
-                    val filteredUnsupported =
-                        unsupportedApps.filter { it.label.contains(query, ignoreCase = true) }
-                    if (filteredUnsupported.isNotEmpty()) {
-                        add(AppSection(R.string.debugging_unsupported, filteredUnsupported, false))
-                    }
+                    //val filteredUnsupported =
+                    //    unsupportedApps.filter { it.label.contains(query, ignoreCase = true) }
+                    //if (filteredUnsupported.isNotEmpty()) {
+                    //    add(AppSection(R.string.debugging_unsupported, filteredUnsupported, false))
+                    //}
                 }
             return AppsGroupState(sections = sections)
         }

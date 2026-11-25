@@ -28,4 +28,8 @@
         </activity>
     </application>
 
+    <instrumentation
+        android:name=".ShellIdentityInstrumentation"
+        android:targetPackage="com.peyo.apfex"
+        android:label="Shell Identity Instrumentation" />
 </manifest>
