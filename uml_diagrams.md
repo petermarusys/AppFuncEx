@@ -1,270 +1,261 @@
 # AppFuncEx (`com.peyo.apfex`) — UML Class & Sequence Diagrams
 
-> [!NOTE]
-> **Architecture Overview**: `AppFuncEx` follows Android Clean Architecture + MVVM with Hilt dependency injection:
-> - **UI Layer** (`ui.screens.debugging`): Jetpack Compose screens and [DebuggingViewModel.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/DebuggingViewModel.kt) managing unidirectional `StateFlow<DebuggingUiState>`.
-> - **Domain Layer** (`domain.*`): Focused use cases for querying/executing Android `AppFunctions`, managing API 37.2+ `AppInteractionSession`s & user consent, launching `PendingIntent`s, and troubleshooting target apps.
-> - **Data Layer** (`data.*`): Jetpack DataStore settings, in-memory `AppInteractionSession` caching, internal agent tools (location, geocoding, Gemini image generation, progressive tool discovery), and Room entities.
+This document describes the architecture, static structure (UML Class Diagrams), and runtime behavior (UML Sequence Diagrams) of **AppFuncEx**, an Android Jetpack Compose + Hilt application for discovering, inspecting, and executing Android **AppFunctions** (`androidx.appfunctions`) and managing `AppInteractionSession` flows.
 
 ---
 
-## 1. UML Class Diagrams
+## 1. Architecture Overview
 
-### 1.1 `DebuggingViewModel` & Direct Collaborators (UI Entry & Injected Dependencies)
+The application follows **Clean Architecture + MVVM** organized into four primary layers:
 
-Focused view of [DebuggingViewModel.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/DebuggingViewModel.kt), the UI Composables in [DebuggingScreen.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/DebuggingScreen.kt) / [FunctionsFoundContent.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/FunctionsFoundContent.kt) / [TroubleshootBottomSheet.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/TroubleshootBottomSheet.kt) that observe and invoke it, and the exact Use Cases and Repository it directly accesses.
+| Layer | Package(s) | Responsibilities |
+| :--- | :--- | :--- |
+| **Entry & DI** | `com.peyo.apfex`, `com.peyo.apfex.di` | Application bootstrap (`AppFunctionsApplication`), Activity host (`MainActivity`), privileged shell permission adoption (`ShellIdentityInstrumentation`), and Hilt bindings (`AppFunctionModule`, `DataModule`). |
+| **UI (Presentation)** | `com.peyo.apfex.ui.screens.debugging`, `com.peyo.apfex.ui.theme` | Unidirectional data flow via `DebuggingViewModel` + `DebuggingUiState`, searchable/pinnable app dropdown, dynamic recursive parameter editors (`AppFunctionDataTypeInput`), and JSON/error/PendingIntent result dialogs (`FunctionsFoundContent`). |
+| **Domain** | `com.peyo.apfex.domain.appfunction`, `com.peyo.apfex.domain.appinteraction`, `com.peyo.apfex.domain.pendingintent` | Stateless/reusable use cases for discovering installed apps and AppFunctions, checking enabled states, converting raw UI/LLM inputs into `AppFunctionData`, granting `content://` URI permissions, managing API 37.2 `AppInteractionSession`s + user consent, executing functions, formatting outputs/exceptions, and launching `PendingIntent`s. |
+| **Data** | `com.peyo.apfex.data`, `com.peyo.apfex.data.db.entities` | Jetpack DataStore settings (`SettingsRepository`), thread-scoped in-memory `AppInteractionSession` cache (`AppInteractionSessionRepository`), built-in agent tools & progressive tool disclosure (`AgentInternalTools`, `ToolDiscoveryTools`), and Room persistence entities (`ThreadEntity`, `MessageEntity`). |
+
+---
+
+## 2. UML Class Diagrams
+
+### 2.1 End-to-End Architecture Class Diagram
 
 ```mermaid
 classDiagram
     direction TB
 
-    class MainActivity {
-        <<AndroidEntryPoint>>
-        +onCreate(Bundle savedInstanceState) void
+    namespace Entry_And_DI {
+        class AppFunctionsApplication {
+            <<HiltAndroidApp>>
+        }
+
+        class ShellIdentityInstrumentation {
+            +onCreate(arguments)
+            +onStart()
+        }
+
+        class MainActivity {
+            <<AndroidEntryPoint>>
+            +String EXTRA_INSTRUMENTATION_ERROR$
+            +onCreate(savedInstanceState)
+        }
+
+        class AppFunctionModule {
+            <<HiltModule>>
+            +provideAppFunctionManager(context) AppFunctionManager
+        }
+
+        class DataModule {
+            <<HiltModule>>
+            +bindSettingsRepository(impl) SettingsRepository*
+            +bindAppInteractionSessionRepository(impl) AppInteractionSessionRepository*
+            +provideDataStore(context) DataStore~Preferences~
+        }
     }
 
-    class DebuggingScreen {
-        <<Composable>>
-        +DebuggingScreen(DebuggingViewModel viewModel) void
-        +DebuggingScreenContent(DebuggingUiState uiState) void
-        +AppDropdown(AppsGroupState appGroups) void
+    namespace UI_Layer {
+        class DebuggingScreen {
+            <<Composable>>
+            +DebuggingScreen(viewModel)
+            +DebuggingScreenContent(uiState, callbacks)
+            +AppDropdown(appGroups, searchQuery)
+        }
+
+        class FunctionsFoundContent {
+            <<Composable>>
+            +FunctionsFoundContent(state, callbacks)
+            +AppFunctionErrorItem(function)
+            -ExecutionResultDataView(formattedJson)
+        }
+
+        class AppFunctionItem {
+            <<Composable>>
+            +AppFunctionItem(function, isEnabled, expanded, inputValues)
+            -ParameterInput(name, dataType, isRequired, value)
+        }
+
+        class AppFunctionDataTypeInput {
+            <<Composable>>
+            +AppFunctionDataTypeInput(dataType, value, onValueChange, components)
+            +PrimitiveTextInput(value, onValueChange)
+            +EnumDropdown(value, options)
+            +BooleanTypeInput(value, onValueChange)
+            +ObjectTypeInput(dataType, value)
+            +ArrayTypeInput(dataType, value)
+            +ComplexTypeInput(label, summary)
+        }
+
+        class DebuggingViewModel {
+            <<HiltViewModel>>
+            +StateFlow~DebuggingUiState~ uiState
+            -List~AppInfo~ allInstalledApps
+            -Set~String~ pinnedPackages
+            -String DEBUG_THREAD_ID$
+            +onAppSelected(appInfo)
+            +onClearSelectedApp()
+            +onSearchQueryChanged(query)
+            +onFunctionInputsChange(functionId, inputs)
+            +onFunctionExpandedChange(functionId, expanded)
+            +invokeFunction(function)
+            +clearResult()
+            +launchPendingIntent(pendingIntent)
+            +onTogglePin(appInfo)
+        }
+
+        class DebuggingUiState {
+            +AppsGroupState filteredApps
+            +AppInfo selectedApp
+            +String searchQuery
+            +Boolean isLoading
+            +SearchAppResultState searchAppResultState
+        }
     }
 
-    class FunctionsFoundContent {
-        <<Composable>>
-        +FunctionsFoundContent(FunctionsFoundState state) void
-        +AppFunctionItem(AppFunctionMetadata function) void
-        +AppFunctionDataTypeInput(AppFunctionDataTypeMetadata dataType) void
+    namespace Domain_Layer {
+        class GetInstalledAppsUseCase {
+            +invoke() List~AppInfo~
+        }
+
+        class GetAppFunctionsUseCase {
+            +invoke(params) Flow~AppFunctionsByPackage~
+        }
+
+        class GetAppFunctionStatesUseCase {
+            +invoke(functionNames) List~AppFunctionState~
+        }
+
+        class ConvertInputToAppFunctionDataUseCase {
+            +invoke(parameters, components, inputs) Result~AppFunctionData~
+        }
+
+        class ExecuteAppFunctionUseCase {
+            +invoke(function, parameters, threadId) ExecuteAppFunctionResult
+        }
+
+        class GrantAppFunctionUriPermissionsUseCase {
+            +invoke(function, parameters)
+        }
+
+        class ConvertAppFunctionDataToJsonUseCase {
+            +invoke(name, data, dataType, components) String
+        }
+
+        class AppFunctionExceptionFormatter {
+            <<object>>
+            +format(exception, functionId) String
+            +getAppFunctionException(throwable) AppFunctionException
+        }
+
+        class StartAppInteractionSessionUseCase {
+            <<Singleton>>
+            +invoke(threadId, targetPackages) AppInteractionSession
+        }
+
+        class HandleUserConsentUseCase {
+            <<Singleton>>
+            +invoke(intentSender)
+        }
+
+        class LaunchPendingIntentUseCase {
+            +invoke(pendingIntent) Result~Unit~
+        }
     }
 
-    class TroubleshootResult {
-        <<Composable>>
-        +TroubleshootResult(TroubleshootUiState state) void
+    namespace Data_Layer {
+        class SettingsRepository {
+            <<interface>>
+            +Flow~String~ geminiApiKey
+            +Flow~Boolean~ progressiveToolDisclosure
+            +Flow~StringSet~ pinnedApps
+            +Flow~StringSet~ disconnectedApps
+            +setGeminiApiKey(apiKey)
+            +setProgressiveToolDisclosure(enabled)
+            +setAppPinned(packageName, pinned)
+            +setAppConnected(packageName, connected)
+        }
+
+        class DataStoreSettingsRepository {
+            -DataStore~Preferences~ dataStore
+        }
+
+        class AppInteractionSessionRepository {
+            <<interface>>
+            +saveSession(threadId, session)
+            +getSession(threadId) AppInteractionSession
+            +invalidateSession(threadId)
+        }
+
+        class InMemoryAppInteractionSessionRepository {
+            <<Singleton>>
+            -ConcurrentHashMap sessionMap
+            -ExecutorService executor
+            -LifecycleListener lifecycleListener
+        }
+
+        class AgentInternalTools {
+            <<Singleton>>
+            +String INTERNAL_TOOL_PACKAGE$
+            +String EXPAND_TOOL_DESCRIPTION$
+            +String EXPAND_FUNCTION_DECLARATIONS$
+            +geocodeAddress(address) LatLng
+            +getCurrentLocation() LatLng
+            +generateImage(prompt, aspectRatio) GeneratedImageResult
+            +getInternalToolsMetadata() List~MetadataAndState~
+            +buildToolDiscoveryTools(apps) List~AppFunctionMetadata~
+            +executeInternalTool(function, parameters, availableApps) ExecuteAppFunctionResult
+        }
+
+        class ToolDiscoveryTools {
+            <<Singleton>>
+            +buildTools(apps) List~AppFunctionMetadata~
+            +execute(function, parameters, apps) ExecuteAppFunctionResult
+        }
     }
 
-    class DebuggingViewModel {
-        <<HiltViewModel>>
-        -MutableStateFlow~DebuggingUiState~ _uiState
-        +StateFlow~DebuggingUiState~ uiState
-        -List~AppInfo~ allInstalledApps
-        -Set~String~ pinnedPackages
-        -Map allAppFunctions
-        -Map allAppFunctionStates
-        +onAppSelected(AppInfo appInfo) void
-        +onClearSelectedApp() void
-        +onSearchQueryChanged(String query) void
-        +onFunctionInputsChange(String functionId, Map inputs) void
-        +onFunctionExpandedChange(String functionId, Boolean expanded) void
-        +invokeFunction(AppFunctionMetadata function) void
-        +clearResult() void
-        +launchPendingIntent(PendingIntent pendingIntent) void
-        +onTogglePin(AppInfo appInfo) void
-        -observePinnedApps() void
-        -loadAppFunctions() void
-        -loadInstalledApps() void
-        -runTroubleshooting(String packageName) void
-    }
-
-    class DebuggingUiState {
-        +AppsGroupState filteredApps
-        +AppInfo selectedApp
-        +String searchQuery
-        +Boolean isLoading
-        +SearchAppResultState searchAppResultState
-    }
-
-    class GetInstalledAppsUseCase {
-        +invoke() List~AppInfo~
-    }
-
-    class GetAppFunctionsUseCase {
-        +invoke(GetAppFunctionsParams params) Flow~AppFunctionMap~
-    }
-
-    class GetAppFunctionStatesUseCase {
-        +invoke(List~AppFunctionName~ functionNames) List~AppFunctionState~
-    }
-
-    class ConvertInputToAppFunctionDataUseCase {
-        +invoke(List parameters, AppFunctionComponentsMetadata components, Map inputs) Result~AppFunctionData~
-    }
-
-    class ExecuteAppFunctionUseCase {
-        +invoke(AppFunctionMetadata function, AppFunctionData parameters, String threadId) ExecuteAppFunctionResult
-    }
-
-    class TroubleshootAppUseCase {
-        +invoke(String packageName) TroubleshootReport
-    }
-
-    class LaunchPendingIntentUseCase {
-        +invoke(PendingIntent pendingIntent) Result~Unit~
-    }
-
-    class SettingsRepository {
-        <<interface>>
-        +Flow~Set~ pinnedApps
-        +setAppPinned(String packageName, Boolean pinned) void
-    }
-
-    %% UI to ViewModel
-    MainActivity --> DebuggingScreen : renders
-    DebuggingScreen --> FunctionsFoundContent : renders when FunctionsFoundState
-    DebuggingScreen --> TroubleshootResult : renders when TroubleshootUiState
+    %% Entry & UI relationships
+    ShellIdentityInstrumentation ..> MainActivity : launches with shell identity
+    MainActivity --> DebuggingScreen : hosts
     DebuggingScreen --> DebuggingViewModel : observes uiState & dispatches events
+    DebuggingScreen --> FunctionsFoundContent : renders when FunctionsFoundState
+    FunctionsFoundContent --> AppFunctionItem : renders per function
+    FunctionsFoundContent ..> AppFunctionExceptionFormatter : formats errors
+    AppFunctionItem --> AppFunctionDataTypeInput : renders per parameter
+    AppFunctionDataTypeInput --> AppFunctionDataTypeInput : recurses for Object / Array / Ref
+    DebuggingViewModel *-- DebuggingUiState : exposes StateFlow
 
-    %% ViewModel State & Direct Accesses
-    DebuggingViewModel *-- DebuggingUiState : exposes via StateFlow
+    %% ViewModel to Domain/Data relationships
     DebuggingViewModel --> GetInstalledAppsUseCase : loads installed apps
-    DebuggingViewModel --> GetAppFunctionsUseCase : observes functions
+    DebuggingViewModel --> GetAppFunctionsUseCase : observes AppFunctions
     DebuggingViewModel --> GetAppFunctionStatesUseCase : queries enabled states
-    DebuggingViewModel --> ConvertInputToAppFunctionDataUseCase : converts UI inputs
-    DebuggingViewModel --> ExecuteAppFunctionUseCase : invokes AppFunction
-    DebuggingViewModel --> TroubleshootAppUseCase : diagnoses unsupported app
-    DebuggingViewModel --> LaunchPendingIntentUseCase : opens PendingIntent result
-    DebuggingViewModel --> SettingsRepository : observes & updates pinnedApps
-```
+    DebuggingViewModel --> ConvertInputToAppFunctionDataUseCase : builds AppFunctionData
+    DebuggingViewModel --> ExecuteAppFunctionUseCase : executes function
+    DebuggingViewModel --> LaunchPendingIntentUseCase : launches PendingIntent
+    DebuggingViewModel --> SettingsRepository : observes/updates pinnedApps
 
----
+    %% Domain internal relationships
+    GetAppFunctionsUseCase --> GetAppFunctionStatesUseCase : filters by enabled state
+    GetAppFunctionsUseCase --> SettingsRepository : filters disconnectedApps
+    GetAppFunctionsUseCase --> AgentInternalTools : gets internal & discovery tools
+    ExecuteAppFunctionUseCase --> GrantAppFunctionUriPermissionsUseCase : grants content URI read perms
+    ExecuteAppFunctionUseCase --> ConvertAppFunctionDataToJsonUseCase : serializes return value
+    ExecuteAppFunctionUseCase --> AgentInternalTools : routes internal tools
+    ExecuteAppFunctionUseCase --> GetAppFunctionsUseCase : resolves connected apps for discovery
+    ExecuteAppFunctionUseCase --> StartAppInteractionSessionUseCase : Lazy acquisition on API 37.2+
+    StartAppInteractionSessionUseCase --> AppInteractionSessionRepository : caches session by threadId
+    StartAppInteractionSessionUseCase --> HandleUserConsentUseCase : launches consent IntentSender
 
-### 1.2 Domain, Data & DI Layer Class Diagram
-
-Shows how Domain Use Cases collaborate with AndroidX `AppFunctionManager`, API 37.2+ `AppInteractionSession` management, internal agent tools, repositories, and Hilt DI modules ([ExecuteAppFunctionUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appfunction/ExecuteAppFunctionUseCase.kt), [GetAppFunctionsUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appfunction/GetAppFunctionsUseCase.kt), [StartAppInteractionSessionUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appinteraction/StartAppInteractionSessionUseCase.kt), [AgentInternalTools.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/data/AgentInternalTools.kt), [AppFunctionModule.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/di/AppFunctionModule.kt), [DataModule.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/di/DataModule.kt)).
-
-```mermaid
-classDiagram
-    direction TB
-
-    class ExecuteAppFunctionUseCase {
-        +invoke(AppFunctionMetadata function, AppFunctionData parameters, String threadId) ExecuteAppFunctionResult
-    }
-
-    class GetAppFunctionsUseCase {
-        +invoke(GetAppFunctionsParams params) Flow~AppFunctionMap~
-    }
-
-    class GetAppFunctionStatesUseCase {
-        +invoke(List~AppFunctionName~ functionNames) List~AppFunctionState~
-    }
-
-    class TroubleshootAppUseCase {
-        +invoke(String packageName) TroubleshootReport
-    }
-
-    class GrantAppFunctionUriPermissionsUseCase {
-        +invoke(AppFunctionMetadata function, AppFunctionData parameters) void
-    }
-
-    class ConvertAppFunctionDataToJsonUseCase {
-        +invoke(String name, AppFunctionData data, AppFunctionDataTypeMetadata dataType, AppFunctionComponentsMetadata components) String
-    }
-
-    class StartAppInteractionSessionUseCase {
-        +invoke(String threadId, List~String~ targetPackages) AppInteractionSession
-    }
-
-    class HandleUserConsentUseCase {
-        +invoke(IntentSender intentSender) void
-    }
-
-    class AppFunctionExceptionFormatter {
-        <<object>>
-        +format(AppFunctionException exception, String functionId) String
-        +getAppFunctionException(Throwable throwable) AppFunctionException
-    }
-
-    class SettingsRepository {
-        <<interface>>
-        +Flow~String~ geminiApiKey
-        +Flow~Boolean~ progressiveToolDisclosure
-        +Flow~Set~ pinnedApps
-        +Flow~Set~ disconnectedApps
-        +setGeminiApiKey(String apiKey) void
-        +setProgressiveToolDisclosure(Boolean enabled) void
-        +setAppPinned(String packageName, Boolean pinned) void
-        +setAppConnected(String packageName, Boolean connected) void
-    }
-
-    class DataStoreSettingsRepository {
-        -DataStore~Preferences~ dataStore
-    }
-
-    class AppInteractionSessionRepository {
-        <<interface>>
-        +saveSession(String threadId, AppInteractionSession session) void
-        +getSession(String threadId) AppInteractionSession
-        +invalidateSession(String threadId) void
-    }
-
-    class InMemoryAppInteractionSessionRepository {
-        -ConcurrentHashMap sessionMap
-        -LifecycleListener lifecycleListener
-    }
-
-    class AgentInternalTools {
-        +geocodeAddress(String address) LatLng
-        +getCurrentLocation() LatLng
-        +generateImage(String prompt, String aspectRatio) GeneratedImageResult
-        +getInternalToolsMetadata() List~Pair~
-        +buildToolDiscoveryTools(Map apps) List~AppFunctionMetadata~
-        +executeInternalTool(AppFunctionMetadata function, AppFunctionData parameters, Map availableApps) ExecuteAppFunctionResult
-    }
-
-    class ToolDiscoveryTools {
-        +buildTools(Map apps) List~AppFunctionMetadata~
-        +execute(AppFunctionMetadata function, AppFunctionData parameters, Map apps) ExecuteAppFunctionResult
-    }
-
-    class AppFunctionModule {
-        <<HiltModule>>
-        +provideAppFunctionManager(Context context) AppFunctionManager
-    }
-
-    class DataModule {
-        <<HiltModule>>
-        +bindSettingsRepository(DataStoreSettingsRepository impl) SettingsRepository
-        +bindAppInteractionSessionRepository(InMemoryAppInteractionSessionRepository impl) AppInteractionSessionRepository
-        +provideDataStore(Context context) DataStore~Preferences~
-    }
-
-    class AppFunctionManager {
-        <<AndroidX>>
-    }
-
-    %% Domain Use Case Collaborations
-    TroubleshootAppUseCase --> GetAppFunctionsUseCase
-
-    GetAppFunctionsUseCase --> AppFunctionManager
-    GetAppFunctionsUseCase --> GetAppFunctionStatesUseCase
-    GetAppFunctionsUseCase --> SettingsRepository
-    GetAppFunctionsUseCase --> AgentInternalTools
-
-    GetAppFunctionStatesUseCase --> AppFunctionManager
-
-    ExecuteAppFunctionUseCase --> AppFunctionManager
-    ExecuteAppFunctionUseCase --> ConvertAppFunctionDataToJsonUseCase
-    ExecuteAppFunctionUseCase --> AgentInternalTools
-    ExecuteAppFunctionUseCase --> GrantAppFunctionUriPermissionsUseCase
-    ExecuteAppFunctionUseCase --> GetAppFunctionsUseCase
-    ExecuteAppFunctionUseCase --> StartAppInteractionSessionUseCase : Lazy
-
-    StartAppInteractionSessionUseCase --> AppInteractionSessionRepository
-    StartAppInteractionSessionUseCase --> HandleUserConsentUseCase
-
-    %% Data Implementations & DI
-    SettingsRepository <|.. DataStoreSettingsRepository
-    AppInteractionSessionRepository <|.. InMemoryAppInteractionSessionRepository
-    AgentInternalTools --> ToolDiscoveryTools
-    AppFunctionModule ..> AppFunctionManager : provides
+    %% Data & DI relationships
+    DataStoreSettingsRepository ..|> SettingsRepository
+    InMemoryAppInteractionSessionRepository ..|> AppInteractionSessionRepository
+    AgentInternalTools --> ToolDiscoveryTools : delegates progressive disclosure
     DataModule ..> DataStoreSettingsRepository : binds
     DataModule ..> InMemoryAppInteractionSessionRepository : binds
 ```
 
 ---
 
-### 1.3 UI State & Domain Result Models
-
-Defined in [DebuggingUiState.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/DebuggingUiState.kt), [ExecuteAppFunctionUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appfunction/ExecuteAppFunctionUseCase.kt#L175-L221), [AppInfo.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appfunction/AppInfo.kt), and [TroubleshootReport.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/troubleshoot/TroubleshootReport.kt).
+### 2.2 Detailed UI State & Domain Model Class Diagram
 
 ```mermaid
 classDiagram
@@ -304,17 +295,12 @@ classDiagram
 
     class FunctionsFoundState {
         +List~AppFunctionMetadata~ functions
-        +Map~AppFunctionName_Boolean~ enabledState
-        +Map~String_Map~ functionInputs
+        +Map~AppFunctionName, Boolean~ enabledState
+        +Map~String, ParameterMap~ functionInputs
         +ExecuteAppFunctionResult executionResult
         +Set~String~ expandedFunctions
         +AppFunctionMetadata executedFunction
-        +Map~String_Any~ executedInputs
-    }
-
-    class TroubleshootUiState {
-        +TroubleshootReport report
-        +Boolean isLoading
+        +Map~String, Any~ executedInputs
     }
 
     class ExecuteAppFunctionResult {
@@ -340,56 +326,96 @@ classDiagram
         +Exception exception
     }
 
-    class TroubleshootReport {
-        +String packageName
-        +List~TroubleshootStep~ steps
+    class ExecutionDisplayItem {
+        <<sealed>>
     }
 
-    class TroubleshootStep {
-        +Int titleResId
-        +StepStatus status
-        +Int messageResId
-        +List~String~ messageArgs
+    class SimpleProperty {
+        +String key
+        +String value
     }
 
-    class StepStatus {
-        <<enumeration>>
-        PASS
-        FAIL
-        WARNING
+    class Group {
+        +String header
+        +List~SimpleProperty~ properties
+    }
+
+    class GetAppFunctionsParams {
+        +Set~String~ targetPackageNames
+        +Boolean isEnabled
+        +Boolean isConnected
+        +Boolean includeInternalTools
+        +Boolean progressiveToolDisclosure
     }
 
     DebuggingUiState *-- AppsGroupState
-    DebuggingUiState o-- AppInfo
+    DebuggingUiState o-- AppInfo : selectedApp
     DebuggingUiState *-- SearchAppResultState
-    AppsGroupState *-- AppSection
-    AppSection o-- AppInfo
+    AppsGroupState *-- AppSection : sections
+    AppSection o-- AppInfo : apps
 
     SearchAppResultState <|-- Idle
     SearchAppResultState <|-- FunctionsFoundState
-    SearchAppResultState <|-- TroubleshootUiState
-
-    FunctionsFoundState o-- ExecuteAppFunctionResult
-    TroubleshootUiState o-- TroubleshootReport
+    FunctionsFoundState o-- ExecuteAppFunctionResult : executionResult
 
     ExecuteAppFunctionResult <|-- Data
     ExecuteAppFunctionResult <|-- PendingIntentAction
     ExecuteAppFunctionResult <|-- ToolsDiscovered
     ExecuteAppFunctionResult <|-- Error
 
-    TroubleshootReport *-- TroubleshootStep
-    TroubleshootStep --> StepStatus
+    ExecutionDisplayItem <|-- SimpleProperty
+    ExecutionDisplayItem <|-- Group
+    Group *-- SimpleProperty : properties
 ```
 
 ---
 
-### 1.4 Room Database Entities
-
-Defined in [ThreadEntity.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/data.db.entities/ThreadEntity.kt) and [MessageEntity.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/data.db.entities/MessageEntity.kt).
+### 2.3 Detailed Data, Internal Tools & Room Entities Class Diagram
 
 ```mermaid
 classDiagram
-    direction LR
+    direction TB
+
+    class AgentInternalTools {
+        <<Singleton>>
+        -Context context
+        -DataStore~Preferences~ settingsDataStore
+        -ToolDiscoveryTools toolDiscoveryTools
+        +geocodeAddress(address) LatLng
+        +getCurrentLocation() LatLng
+        +generateImage(prompt, aspectRatio) GeneratedImageResult
+        +getInternalToolsMetadata() List~MetadataAndState~
+        +buildToolDiscoveryTools(apps) List~AppFunctionMetadata~
+        +executeInternalTool(function, parameters, availableApps) ExecuteAppFunctionResult
+    }
+
+    class LatLng {
+        +Double latitude
+        +Double longitude
+    }
+
+    class GeneratedImageResult {
+        +String imageUri
+        +String mimeType
+        +String prompt
+    }
+
+    class ToolDiscoveryTools {
+        <<Singleton>>
+        -Context context
+        +buildTools(apps) List~AppFunctionMetadata~
+        +execute(function, parameters, apps) ExecuteAppFunctionResult
+        -expandToolDescription(packageMetadata, functions) ExecuteAppFunctionResult
+        -expandFunctionDeclarations(packageName, functions, requestedIds) ExecuteAppFunctionResult
+    }
+
+    class CatalogEntry {
+        -String packageName
+        -String label
+        -String instructions
+        -List~AppFunctionMetadata~ functions
+        +summary() String
+    }
 
     class ThreadEntity {
         <<RoomEntity>>
@@ -412,13 +438,15 @@ classDiagram
     }
 
     class MessageAttachment {
+        <<Serializable>>
         +String uri
         +String mimeType
     }
 
     class MessageAttachmentConverter {
-        +fromAttachments(List~MessageAttachment~ attachments) String
-        +toAttachments(String jsonString) List~MessageAttachment~
+        <<RoomTypeConverter>>
+        +fromAttachments(attachments) String
+        +toAttachments(jsonString) List~MessageAttachment~
     }
 
     class MessageRole {
@@ -434,25 +462,81 @@ classDiagram
         FAILED
     }
 
-    ThreadEntity "1" <-- "*" MessageEntity : foreignKey threadId
-    MessageEntity *-- MessageAttachment
+    AgentInternalTools *-- LatLng
+    AgentInternalTools *-- GeneratedImageResult
+    AgentInternalTools --> ToolDiscoveryTools
+    ToolDiscoveryTools *-- CatalogEntry
+
+    ThreadEntity "1" <-- "*" MessageEntity : ForeignKey(CASCADE)
+    MessageEntity *-- MessageAttachment : attachments
     MessageEntity --> MessageRole
     MessageEntity --> MessageProcessingStatus
-    MessageAttachmentConverter ..> MessageAttachment : serializes
+    MessageAttachmentConverter ..> MessageAttachment : JSON serialize/deserialize
 ```
 
 ---
 
-## 2. UML Sequence Diagrams
+## 3. UML Sequence Diagrams
 
-### 2.1 Initialization & Reactive App Discovery
+### 3.1 Privileged App Launch & Shell Permission Adoption
 
-Triggered when `MainActivity` mounts `DebuggingScreen` and instantiates [DebuggingViewModel.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/DebuggingViewModel.kt#L79-L121). Three concurrent coroutines load installed packages, observe `AppFunctionManager` metadata + states, and observe pinned apps from DataStore to build grouped dropdown sections (`Pinned`, `Supported`, `Unsupported`).
+Launching `AppFuncEx` via [`startAppFunctionTestingAgent`](file:///home/hdyoon/ex/apfex/startAppFunctionTestingAgent) configures device allowlists and starts [`ShellIdentityInstrumentation`](file:///home/hdyoon/ex/apfex/src/com/peyo/apfex/ShellIdentityInstrumentation.kt) so the process holds `android.permission.EXECUTE_APP_FUNCTIONS`.
 
 ```mermaid
 sequenceDiagram
+    autonumber
+    actor Dev as Developer
+    participant Script as startAppFunctionTestingAgent
+    participant ADB as Android OS / ADB Shell
+    participant Inst as ShellIdentityInstrumentation
+    participant UiAuto as UiAutomation
+    participant Main as MainActivity
+
+    Dev->>Script: ./startAppFunctionTestingAgent [-s SERIAL]
+    Script->>ADB: pm list packages & dumpsys package com.peyo.apfex
+    ADB-->>Script: Package signature fingerprint
+
+    opt SDK >= 37
+        Script->>ADB: cmd allowlist add-package-with-metadata-multimap (...)
+        Script->>ADB: cmd app_function flush-allowlist-changes
+    end
+
+    opt SDK >= 35
+        Script->>ADB: cmd appops set com.android.shell (AUDIO ops) allow
+    end
+
+    Script->>ADB: am force-stop com.peyo.apfex
+    Script->>ADB: am instrument -w com.peyo.apfex/.ShellIdentityInstrumentation (background)
+
+    ADB->>Inst: onCreate(arguments)
+    Inst->>Inst: start()
+    ADB->>Inst: onStart()
+    Inst->>UiAuto: getUiAutomation()
+
+    alt UiAutomation available
+        Inst->>UiAuto: adoptShellPermissionIdentity("android.permission.EXECUTE_APP_FUNCTIONS")
+        Inst->>Main: startActivity(Intent FLAG_ACTIVITY_NEW_TASK)
+    else UiAutomation is null
+        Inst->>Main: startActivity(Intent + EXTRA_INSTRUMENTATION_ERROR)
+    end
+
+    Inst->>Inst: CountDownLatch(1).await() (keeps shell identity alive)
+
+    opt Instrumentation process exited within 2s
+        Script->>ADB: Fallback am start -n com.peyo.apfex/.MainActivity
+    end
+```
+
+---
+
+### 3.2 App Discovery, Filtering & Selection Flow
+
+When [`MainActivity`](file:///home/hdyoon/ex/apfex/src/com/peyo/apfex/MainActivity.kt) mounts [`DebuggingScreen`](file:///home/hdyoon/ex/apfex/src/com/peyo/apfex/ui/screens/debugging/DebuggingScreen.kt), [`DebuggingViewModel`](file:///home/hdyoon/ex/apfex/src/com/peyo/apfex/ui/screens/debugging/DebuggingViewModel.kt) concurrently loads installed apps, observes `AppFunctionManager` search results + enabled states, and observes pinned packages from DataStore.
+
+```mermaid
+sequenceDiagram
+    autonumber
     actor User
-    participant Activity as MainActivity
     participant Screen as DebuggingScreen
     participant VM as DebuggingViewModel
     participant InstalledUC as GetInstalledAppsUseCase
@@ -462,183 +546,174 @@ sequenceDiagram
     participant AFM as AppFunctionManager
     participant PM as PackageManager
 
-    User->>Activity: Launch App
-    Activity->>Screen: setContent { DebuggingScreen() }
-    Screen->>VM: hiltViewModel() & collect uiState
+    Screen->>VM: hiltViewModel() / init
 
     par Load Installed Apps
         VM->>InstalledUC: invoke()
         InstalledUC->>PM: getInstalledApplications(0)
         PM-->>InstalledUC: ApplicationInfo list
-        InstalledUC-->>VM: List<AppInfo> (sorted by label)
+        InstalledUC-->>VM: Sorted List of AppInfo
         VM->>VM: updateAppsGroupState()
-    and Observe Available AppFunctions
-        VM->>FuncsUC: invoke(includeInternalTools = false)
-        FuncsUC->>AFM: observeAppFunctions() + searchAppFunctions(spec)
-        AFM-->>FuncsUC: List<AppFunctionMetadata>
-        FuncsUC-->>VM: Flow<Map<AppFunctionPackageMetadata, List<AppFunctionMetadata>>>
+    and Observe AppFunctions & States
+        VM->>FuncsUC: invoke(GetAppFunctionsParams(includeInternalTools = false))
+        FuncsUC->>AFM: observeAppFunctions() (debounced 500ms)
+        AFM-->>FuncsUC: Change notification / onStart
+        FuncsUC->>AFM: searchAppFunctions(AppFunctionSearchSpec)
+        AFM-->>FuncsUC: List of AppFunctionMetadata
+        FuncsUC-->>VM: Map of PackageMetadata to AppFunctionMetadata list
         VM->>StatesUC: invoke(allFunctionNames)
-        StatesUC->>AFM: getAppFunctionStates(allFunctionNames)
-        AFM-->>StatesUC: List<AppFunctionState>
-        StatesUC-->>VM: List<AppFunctionState>
+        StatesUC->>AFM: getAppFunctionStates(functionNames)
+        AFM-->>StatesUC: List of AppFunctionState
+        StatesUC-->>VM: List of AppFunctionState
         VM->>VM: updateAppsGroupState()
     and Observe Pinned Apps
-        VM->>Settings: pinnedApps.collect
-        Settings-->>VM: Set<String> pinnedPackages
+        VM->>Settings: pinnedApps.collect()
+        Settings-->>VM: Set of pinnedPackages
         VM->>VM: updateAppsGroupState()
     end
 
-    VM-->>Screen: Emit DebuggingUiState (Pinned / Supported / Unsupported sections)
-    Screen-->>User: Display searchable AppDropdown
-```
+    VM-->>Screen: Emit DebuggingUiState(filteredApps)
 
----
-
-### 2.2 App Selection & Automated Troubleshooting Flow
-
-When a user selects an app in [DebuggingScreen.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/DebuggingScreen.kt#L333-L337), [DebuggingViewModel.onAppSelected](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/ui/screens/debugging/DebuggingViewModel.kt#L124-L152) either populates the discovered functions list or runs the 5-step diagnostic pipeline in [TroubleshootAppUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/troubleshoot/TroubleshootAppUseCase.kt).
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant Screen as DebuggingScreen
-    participant VM as DebuggingViewModel
-    participant TroubleshootUC as TroubleshootAppUseCase
-    participant FuncsUC as GetAppFunctionsUseCase
-    participant PM as PackageManager
-    participant PkgCtx as TargetPackageContext
+    opt User toggles app pin
+        User->>Screen: Tap Pin icon on AppDropdownItem
+        Screen->>VM: onTogglePin(appInfo)
+        VM->>Settings: setAppPinned(packageName, !isPinned)
+        Settings-->>VM: Emits updated pinnedApps Set
+        VM-->>Screen: Emit updated DebuggingUiState
+    end
 
     User->>Screen: Select app from AppDropdown
     Screen->>VM: onAppSelected(appInfo)
+    VM->>VM: Match app functions & build enabledState map
+    VM-->>Screen: Emit DebuggingUiState(selectedApp, FunctionsFoundState)
+```
 
-    alt App has discovered AppFunctions (Supported)
-        VM->>VM: Map function.name -> enabledState.isEnabled
-        VM-->>Screen: Update uiState with FunctionsFoundState
-        Screen-->>User: Render FunctionsFoundContent (AppFunctionItem list)
-    else App has no discovered AppFunctions (Unsupported)
-        VM-->>Screen: Update uiState with TroubleshootUiState(isLoading = true)
-        VM->>TroubleshootUC: invoke(appInfo.packageName)
+---
 
-        TroubleshootUC->>FuncsUC: Step 1 - invoke(targetPackageNames = {pkg}).first()
-        FuncsUC-->>TroubleshootUC: Map of visible functions
+### 3.3 External AppFunction Execution, User Consent & PendingIntent Flow
 
-        alt Already visible on re-check
-            TroubleshootUC-->>VM: TroubleshootReport (Step 1 PASS)
-        else Not listed in AppFunctionManager
-            TroubleshootUC->>PM: Step 2 - queryIntentServices("android.app.appfunctions.AppFunctionService")
-            PM-->>TroubleshootUC: ResolveInfo list
+This sequence traces parameter input editing, conversion into `AppFunctionData`, `content://` URI permission granting, API 37.2 `AppInteractionSession` creation/updating (with `IntentSender` user consent), execution via `AppFunctionManager`, and handling `Data`, `PendingIntentAction`, or `Error` results.
 
-            alt Service missing
-                TroubleshootUC-->>VM: TroubleshootReport (Step 2 FAIL)
-            else Service declared
-                TroubleshootUC->>PM: Step 3 - getProperty("android.app.appfunctions.v2", componentName)
-                PM-->>TroubleshootUC: Property XML asset path (or NameNotFoundException)
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant UI as FunctionsFoundContent / AppFunctionItem
+    participant VM as DebuggingViewModel
+    participant ConvertIn as ConvertInputToAppFunctionDataUseCase
+    participant ExecUC as ExecuteAppFunctionUseCase
+    participant UriPermUC as GrantAppFunctionUriPermissionsUseCase
+    participant SessionUC as StartAppInteractionSessionUseCase
+    participant SessionRepo as AppInteractionSessionRepository
+    participant ConsentUC as HandleUserConsentUseCase
+    participant AIM as AppInteractionManager / Session
+    participant AFM as AppFunctionManager
+    participant ConvertOut as ConvertAppFunctionDataToJsonUseCase
+    participant LaunchPI as LaunchPendingIntentUseCase
 
-                alt Property missing
-                    TroubleshootUC-->>VM: TroubleshootReport (Step 3 FAIL)
-                else Property present
-                    TroubleshootUC->>PkgCtx: Step 4 - createPackageContext(pkg) & assets.open(propertyValue)
-                    PkgCtx-->>TroubleshootUC: Asset stream or Exception
+    User->>UI: Expand function & enter parameter values
+    UI->>VM: onFunctionInputsChange(functionId, inputs)
+    VM-->>UI: Update functionInputs in FunctionsFoundState
 
-                    alt Asset missing
-                        TroubleshootUC-->>VM: TroubleshootReport (Step 4 FAIL)
-                    else Asset valid
-                        TroubleshootUC-->>VM: TroubleshootReport (Steps 2-4 PASS, Step 5 WARNING fallback)
-                    end
-                end
+    User->>UI: Tap "Run"
+    UI->>VM: invokeFunction(function)
+    VM->>ConvertIn: invoke(function.parameters, function.components, inputs)
+    ConvertIn-->>VM: Result(AppFunctionData)
+
+    VM->>ExecUC: invoke(function, appFunctionData, "debugging-thread")
+    ExecUC->>UriPermUC: invoke(function, appFunctionData)
+    UriPermUC->>UriPermUC: Recursively grant FLAG_GRANT_READ_URI_PERMISSION on content:// URIs
+
+    alt API >= 37.2 (CINNAMON_BUN_2)
+        ExecUC->>SessionUC: invoke("debugging-thread", [targetPackageName])
+        SessionUC->>SessionRepo: getSession("debugging-thread")
+        alt Session not cached
+            SessionUC->>AIM: createSession(CreateParams)
+            opt System requests user consent
+                AIM->>ConsentUC: onStartIntentSender(intentSender)
+                ConsentUC->>User: startIntentSender(FLAG_ACTIVITY_NEW_TASK)
+                User-->>AIM: Approve / Deny consent
             end
+            AIM-->>SessionUC: AppInteractionSession
+            SessionUC->>SessionRepo: saveSession("debugging-thread", session)
+        else Session already cached
+            SessionUC->>AIM: session.update(UpdateParams)
+            opt Additional target package requires consent
+                AIM->>ConsentUC: onStartIntentSender(intentSender)
+                ConsentUC->>User: startIntentSender(FLAG_ACTIVITY_NEW_TASK)
+            end
+            AIM-->>SessionUC: Updated AppInteractionSession
         end
+        SessionUC-->>ExecUC: Active AppInteractionSession
+        ExecUC->>AFM: executeAppFunction(session, request)
+    else API < 37.2
+        ExecUC->>AFM: executeAppFunction(request)
+    end
 
-        VM-->>Screen: Update uiState with TroubleshootUiState(isLoading = false, report)
-        Screen-->>User: Render TroubleshootResult steps
+    AFM-->>ExecUC: ExecuteAppFunctionResponse
+
+    alt ExecuteAppFunctionResponse.Success (Standard Data)
+        ExecUC->>ConvertOut: invoke(PROPERTY_RETURN_VALUE, data, valueType, components)
+        ConvertOut-->>ExecUC: Pretty-printed JSON String
+        ExecUC-->>VM: ExecuteAppFunctionResult.Data(data, formattedJson)
+        VM-->>UI: Show Result AlertDialog (ExecutionResultDataView)
+    else ExecuteAppFunctionResponse.Success (PendingIntent Return Value)
+        ExecUC-->>VM: ExecuteAppFunctionResult.PendingIntentAction(pendingIntent)
+        VM-->>UI: Show Action Required AlertDialog
+        User->>UI: Tap "Open"
+        UI->>VM: launchPendingIntent(pendingIntent)
+        VM->>LaunchPI: invoke(pendingIntent)
+        LaunchPI->>LaunchPI: pendingIntent.send(MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+        LaunchPI-->>VM: Result.success
+        VM->>VM: clearResult()
+    else ExecuteAppFunctionResponse.Error or Exception
+        ExecUC-->>VM: ExecuteAppFunctionResult.Error(exception)
+        VM-->>UI: Show Error AlertDialog (AppFunctionExceptionFormatter)
     end
 ```
 
 ---
 
-### 2.3 AppFunction Execution, Session Consent & PendingIntent Launch
+### 3.4 Internal Agent Tools & Progressive Tool Disclosure Flow
 
-Covers parameter input conversion ([ConvertInputToAppFunctionDataUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appfunction/ConvertInputToAppFunctionDataUseCase.kt)), URI permission grants ([GrantAppFunctionUriPermissionsUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appfunction/GrantAppFunctionUriPermissionsUseCase.kt)), API 37.2+ `AppInteractionSession` acquisition and consent UI ([StartAppInteractionSessionUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appinteraction/StartAppInteractionSessionUseCase.kt)), execution ([ExecuteAppFunctionUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/appfunction/ExecuteAppFunctionUseCase.kt)), and optional `PendingIntent` follow-up ([LaunchPendingIntentUseCase.kt](file:///home/hdyoon/ex/rtlmex/src/com/peyo/apfex/domain/pendingintent/LaunchPendingIntentUseCase.kt)).
+In addition to external `AppFunctions`, the domain and data layers provide built-in agent tools (`com.example.appfunctions.agent.internal`) and a two-step progressive tool disclosure protocol via [`AgentInternalTools`](file:///home/hdyoon/ex/apfex/src/com/peyo/apfex/data/AgentInternalTools.kt) and [`ToolDiscoveryTools`](file:///home/hdyoon/ex/apfex/src/com/peyo/apfex/data/ToolDiscoveryTools.kt).
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant UI as FunctionsFoundContent
-    participant VM as DebuggingViewModel
-    participant InputUC as ConvertInputToAppFunctionDataUseCase
+    autonumber
+    actor Caller as Agent / Caller
+    participant FuncsUC as GetAppFunctionsUseCase
     participant ExecUC as ExecuteAppFunctionUseCase
     participant Internal as AgentInternalTools
-    participant UriUC as GrantAppFunctionUriPermissionsUseCase
-    participant SessionUC as StartAppInteractionSessionUseCase
-    participant SessionRepo as AppInteractionSessionRepository
-    participant AIM as AppInteractionManager
-    participant ConsentUC as HandleUserConsentUseCase
-    participant AFM as AppFunctionManager
-    participant JsonUC as ConvertAppFunctionDataToJsonUseCase
-    participant LaunchUC as LaunchPendingIntentUseCase
+    participant Discovery as ToolDiscoveryTools
+    participant AndroidSys as LocationManager / Geocoder / Gemini API
 
-    User->>UI: Fill parameters & tap Invoke
-    UI->>VM: invokeFunction(function)
-    VM->>InputUC: invoke(parameters, components, inputs)
-    InputUC-->>VM: Result.success(AppFunctionData)
+    Caller->>FuncsUC: invoke(GetAppFunctionsParams(progressiveToolDisclosure = true))
+    FuncsUC->>Internal: getInternalToolsMetadata()
+    FuncsUC->>Internal: buildToolDiscoveryTools(externalAppsByPackage)
+    Internal->>Discovery: buildTools(externalAppsByPackage)
+    Discovery-->>FuncsUC: [expand_tool_description, expand_function_declarations]
+    FuncsUC-->>Caller: Internal tools + Discovery tools
 
-    VM->>ExecUC: invoke(function, appFunctionData, "debugging-thread")
-
-    alt Internal Agent Tool (com.example.appfunctions.agent.internal)
-        ExecUC->>Internal: executeInternalTool(function, parameters, availableApps)
-        Internal-->>ExecUC: ExecuteAppFunctionResult (Data / ToolsDiscovered / Error)
-    else External AppFunction
-        ExecUC->>UriUC: invoke(function, appFunctionData)
-        Note over UriUC: Recursively grants FLAG_GRANT_READ_URI_PERMISSION for content:// URIs
-        UriUC-->>ExecUC: Unit
-
-        ExecUC->>ExecUC: Build ExecuteAppFunctionRequest (with AppInteractionAttribution on API 37+)
-
-        alt API >= 37.2 (CINNAMON_BUN_2)
-            ExecUC->>SessionUC: invoke(threadId, [targetPackageName])
-            SessionUC->>SessionRepo: getSession(threadId)
-            alt Cached session exists
-                SessionRepo-->>SessionUC: existingSession
-                SessionUC->>AIM: existingSession.update(UpdateParams)
-            else No cached session
-                SessionRepo-->>SessionUC: null
-                SessionUC->>AIM: createSession(CreateParams)
-                opt User consent required by OS
-                    AIM->>ConsentUC: onStartIntentSenderCallback(intentSender)
-                    ConsentUC->>User: context.startIntentSender() Consent Prompt
-                    User-->>AIM: Approve / Deny interaction
-                end
-                AIM-->>SessionUC: active AppInteractionSession
-                SessionUC->>SessionRepo: saveSession(threadId, session)
-            end
-            SessionUC-->>ExecUC: AppInteractionSession
-            ExecUC->>AFM: executeAppFunction(session, request)
-        else API < 37.2
-            ExecUC->>AFM: executeAppFunction(request)
-        end
-
-        AFM-->>ExecUC: ExecuteAppFunctionResponse
-
-        alt Response is Success (PendingIntent return type)
-            ExecUC-->>VM: ExecuteAppFunctionResult.PendingIntentAction(pendingIntent)
-        else Response is Success (Standard data return type)
-            ExecUC->>JsonUC: invoke(PROPERTY_RETURN_VALUE, returnValue, valueType, components)
-            JsonUC-->>ExecUC: Pretty-printed JSON string
-            ExecUC-->>VM: ExecuteAppFunctionResult.Data(data, formattedJson)
-        else Response is Error or Exception thrown
-            ExecUC-->>VM: ExecuteAppFunctionResult.Error(exception)
-        end
-    end
-
-    VM-->>UI: Update FunctionsFoundState(executionResult)
-    UI-->>User: Show AlertDialog (Formatted JSON / Error / PendingIntent Action)
-
-    opt Result is PendingIntentAction & User taps Open
-        User->>UI: Tap Open button
-        UI->>VM: launchPendingIntent(pendingIntent)
-        VM->>LaunchUC: invoke(pendingIntent)
-        Note over LaunchUC: Sends PendingIntent with MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-        LaunchUC-->>VM: Result<Unit>
-        VM-->>UI: clearResult() or display error
+    alt Progressive Discovery Step 1: Inspect App Summary
+        Caller->>ExecUC: invoke(expand_tool_description, {package_name}, threadId)
+        ExecUC->>FuncsUC: invoke(isEnabled=true, isConnected=true, includeInternalTools=false).first()
+        FuncsUC-->>ExecUC: availableApps map
+        ExecUC->>Internal: executeInternalTool(function, params, availableApps)
+        Internal->>Discovery: execute(expand_tool_description, params, availableApps)
+        Discovery-->>Caller: ExecuteAppFunctionResult.Data (instructions + function_id summaries)
+    else Progressive Discovery Step 2: Load Full Schemas
+        Caller->>ExecUC: invoke(expand_function_declarations, {package_name, function_ids}, threadId)
+        ExecUC->>FuncsUC: invoke(isEnabled=true, isConnected=true, includeInternalTools=false).first()
+        FuncsUC-->>ExecUC: availableApps map
+        ExecUC->>Internal: executeInternalTool(function, params, availableApps)
+        Internal->>Discovery: execute(expand_function_declarations, params, availableApps)
+        Discovery-->>Caller: ExecuteAppFunctionResult.ToolsDiscovered(json, loadedMetadataList)
+    else Built-in Utility Tool (getCurrentLocation / geocodeAddress / generateImage)
+        Caller->>ExecUC: invoke(internalTool, params, threadId)
+        ExecUC->>Internal: executeInternalTool(internalTool, params, emptyMap())
+        Internal->>AndroidSys: Query GPS/Network, Geocoder, or Gemini Image REST API + FileProvider
+        AndroidSys-->>Internal: LatLng or GeneratedImageResult (content:// URI)
+        Internal-->>Caller: ExecuteAppFunctionResult.Data(data, formattedJson)
     end
 ```

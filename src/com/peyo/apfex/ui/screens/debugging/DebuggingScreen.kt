@@ -160,12 +160,6 @@ fun DebuggingScreenContent(
                         onLaunchPendingIntent = onLaunchPendingIntent,
                     )
                 }
-                is SearchAppResultState.TroubleshootUiState -> {
-                    TroubleshootResult(
-                        state = searchAppResultState,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
             }
         }
     }

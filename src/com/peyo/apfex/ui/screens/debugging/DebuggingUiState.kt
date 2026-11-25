@@ -19,7 +19,6 @@ import androidx.appfunctions.AppFunctionName
 import androidx.appfunctions.metadata.AppFunctionMetadata
 import com.peyo.apfex.domain.appfunction.AppInfo
 import com.peyo.apfex.domain.appfunction.ExecuteAppFunctionResult
-import com.peyo.apfex.domain.troubleshoot.TroubleshootReport
 
 
 /** UI state for the Debugging Screen. */
@@ -48,10 +47,5 @@ sealed class SearchAppResultState {
         val expandedFunctions: Set<String> = emptySet(),
         val executedFunction: AppFunctionMetadata? = null,
         val executedInputs: Map<String, Any> = emptyMap(),
-    ) : SearchAppResultState()
-
-    data class TroubleshootUiState(
-        val report: TroubleshootReport? = null,
-        val isLoading: Boolean = false,
     ) : SearchAppResultState()
 }

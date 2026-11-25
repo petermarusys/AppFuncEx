@@ -36,7 +36,6 @@ import com.peyo.apfex.domain.appfunction.GetAppFunctionsParams
 import com.peyo.apfex.domain.appfunction.GetAppFunctionsUseCase
 import com.peyo.apfex.domain.appfunction.GetInstalledAppsUseCase
 import com.peyo.apfex.domain.pendingintent.LaunchPendingIntentUseCase
-import com.peyo.apfex.domain.troubleshoot.TroubleshootAppUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -62,10 +61,8 @@ class DebuggingViewModel
         private val convertInputToAppFunctionDataUseCase: ConvertInputToAppFunctionDataUseCase,
         private val executeAppFunctionUseCase: ExecuteAppFunctionUseCase,
         private val getInstalledAppsUseCase: GetInstalledAppsUseCase,
-        private val troubleshootAppUseCase: TroubleshootAppUseCase,
         private val launchPendingIntentUseCase: LaunchPendingIntentUseCase,
         private val settingsRepository: SettingsRepository,
-        @ApplicationContext private val context: Context,
     ) : ViewModel() {
         private val _uiState = MutableStateFlow(DebuggingUiState())
         val uiState: StateFlow<DebuggingUiState> = _uiState.asStateFlow()
@@ -124,9 +121,7 @@ class DebuggingViewModel
         fun onAppSelected(appInfo: AppInfo) {
             val functions =
                 allAppFunctions.entries.find { it.key.packageName == appInfo.packageName }?.value
-            if (functions == null) {
-                runTroubleshooting(appInfo.packageName)
-            } else {
+            if (functions != null) {
                 val enabledStates =
                     buildMap {
                         for (function in functions) {
@@ -330,35 +325,12 @@ class DebuggingViewModel
             }
         }
 
-        private fun runTroubleshooting(packageName: String) {
-            viewModelScope.launch {
-                _uiState.update {
-                    it.copy(
-                        searchAppResultState =
-                            SearchAppResultState.TroubleshootUiState(isLoading = true),
-                    )
-                }
-                val report = troubleshootAppUseCase(packageName)
-                _uiState.update {
-                    it.copy(
-                        searchAppResultState =
-                            SearchAppResultState.TroubleshootUiState(
-                                isLoading = false,
-                                report = report,
-                            ),
-                    )
-                }
-            }
-        }
-
         private fun filterApps(query: String): AppsGroupState {
             val supportedPackageNames = allAppFunctions.keys.map { it.packageName }.toSet()
             val pinnedApps = allInstalledApps.filter { pinnedPackages.contains(it.packageName) }
             val remainingApps = allInstalledApps.filter { !pinnedPackages.contains(it.packageName) }
 
             val supportedApps = remainingApps.filter { supportedPackageNames.contains(it.packageName) }
-            val unsupportedApps =
-                remainingApps.filter { !supportedPackageNames.contains(it.packageName) }
 
             val sections =
                 buildList {
@@ -372,12 +344,6 @@ class DebuggingViewModel
                     if (filteredSupported.isNotEmpty()) {
                         add(AppSection(R.string.debugging_supported, filteredSupported, true))
                     }
-
-                    //val filteredUnsupported =
-                    //    unsupportedApps.filter { it.label.contains(query, ignoreCase = true) }
-                    //if (filteredUnsupported.isNotEmpty()) {
-                    //    add(AppSection(R.string.debugging_unsupported, filteredUnsupported, false))
-                    //}
                 }
             return AppsGroupState(sections = sections)
         }
