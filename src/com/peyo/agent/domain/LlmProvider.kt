@@ -1,0 +1,107 @@
+/*
+ * Copyright 2026 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.peyo.agent.domain
+
+import androidx.appfunctions.metadata.AppFunctionMetadata
+import com.peyo.agent.data.LlmModel
+import com.peyo.agent.data.ServiceTier
+
+/** Interface for LLM providers to generate responses. */
+interface LlmProvider {
+    /**
+     * The name of the model new threads use while [getAvailableModels] lists it, or null for no
+     * preference. See [resolveDefaultModel].
+     */
+    val defaultModelName: String?
+        get() = null
+
+    /**
+     * Retrieves the list of available models from this LLM provider: the models that can run the
+     * agent's chat with function calling, in display order. The order doesn't determine the default
+     * model, which [resolveDefaultModel] picks.
+     *
+     * @param apiKey The API key for the LLM provider, or null/blank if not configured.
+     * @return The list of available [LlmModel]s supported by this provider.
+     */
+    suspend fun getAvailableModels(apiKey: String?): List<LlmModel> = emptyList()
+
+    /**
+     * Generates a response from the LLM.
+     *
+     * @param previousInteractionId The ID of the previous interaction to continue the conversation.
+     *   Pass null for the first turn.
+     * @param input The new input (user message or tool response).
+     * @param tools The list of available tools (AppFunctions).
+     * @param apiKey The API key for the LLM provider.
+     * @param modelName The name of the model to use.
+     * @param serviceTier The processing tier to request for this call.
+     * @return The response from the LLM, including the new interaction ID.
+     */
+    suspend fun generateResponse(
+        previousInteractionId: String?,
+        input: LlmInput,
+        tools: List<AppFunctionMetadata>,
+        apiKey: String,
+        modelName: String,
+        serviceTier: ServiceTier = ServiceTier.STANDARD,
+    ): LlmResponse
+}
+
+/**
+ * Returns the model for new threads among [availableModels], the models this provider's
+ * [LlmProvider.getAvailableModels] returned: the model named [LlmProvider.defaultModelName]
+ * if it is listed, otherwise the first available model, or null if there are none.
+ */
+fun LlmProvider.resolveDefaultModel(availableModels: List<LlmModel>): LlmModel? =
+    availableModels.find { it.modelName == defaultModelName } ?: availableModels.firstOrNull()
+
+/** Represents the input to the LLM, which can be a user message or a response from a tool. */
+sealed class LlmInput {
+    /** Represents a new message from the user. */
+    data class UserMessage(val text: String) : LlmInput()
+
+    /** Represents the results of tool executions to be sent back to the LLM. */
+    data class ToolResponse(val outputs: List<ToolOutput>) : LlmInput()
+}
+
+/**
+ * Represents the result of a tool execution to be sent back to the LLM.
+ *
+ * @property images Images the tool returned, for the model to see together with [result].
+ */
+data class ToolOutput(
+    val functionId: String,
+    val callId: String,
+    val result: String,
+    val images: List<ToolOutputImage> = emptyList(),
+)
+
+/**
+ * An image returned by a tool.
+ *
+ * @property mimeType The MIME type of [data], e.g. `image/png`.
+ * @property data The encoded image.
+ */
+class ToolOutputImage(
+    val mimeType: String,
+    val data: ByteArray,
+) {
+    override fun equals(other: Any?): Boolean = other is ToolOutputImage && mimeType == other.mimeType && data.contentEquals(other.data)
+
+    override fun hashCode(): Int = 31 * mimeType.hashCode() + data.contentHashCode()
+
+    override fun toString(): String = "ToolOutputImage(mimeType=$mimeType, size=${data.size})"
+}
