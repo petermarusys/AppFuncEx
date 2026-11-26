@@ -85,6 +85,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.compositionLocalWithComputedDefaultOf
@@ -94,6 +95,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -104,10 +106,13 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -149,7 +154,14 @@ import com.peyo.agent.ui.screens.debugging.LazyExposedDropdownMenu
 import com.peyo.agent.ui.screens.main.StatusWarningDialog
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
+
+private object NoOpSoftwareKeyboardController : SoftwareKeyboardController {
+    override fun show() = Unit
+
+    override fun hide() = Unit
+}
 
 
 private fun noLocalProvidedFor(name: String): Nothing {
@@ -281,7 +293,7 @@ fun AgentDemoLoadingScreen() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun AgentDemoLoadedScreen(
     uiState: AgentUiState.Loaded,
@@ -508,60 +520,68 @@ fun AgentDemoLoadedScreen(
 
                 // Input area
                 Box(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(
-                        value = messageText,
-                        onValueChange = { newValue ->
-                            messageText = newValue
-                            val currentText = newValue.text
-                            if (selectedAppPackageName != null && appMentionRegex != null) {
-                                if (!appMentionRegex.containsMatchIn(currentText)) {
-                                    selectedAppPackageName = null
-                                }
-                            }
-                        },
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp)
-                                .onPreviewKeyEvent { keyEvent ->
-                                    if (
-                                        (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) &&
-                                        keyEvent.type == KeyEventType.KeyDown
-                                    ) {
-                                        sendMessage()
-                                        true
-                                    } else {
-                                        false
+                    CompositionLocalProvider(
+                        LocalSoftwareKeyboardController provides NoOpSoftwareKeyboardController,
+                    ) {
+                        InterceptPlatformTextInput(
+                            interceptor = { _, _ -> awaitCancellation() },
+                        ) {
+                            OutlinedTextField(
+                                value = messageText,
+                                onValueChange = { newValue ->
+                                    messageText = newValue
+                                    val currentText = newValue.text
+                                    if (selectedAppPackageName != null && appMentionRegex != null) {
+                                        if (!appMentionRegex.containsMatchIn(currentText)) {
+                                            selectedAppPackageName = null
+                                        }
                                     }
                                 },
-                        enabled = isTextInputEnabled,
-                        shape = CircleShape,
-                        visualTransformation = visualTransformation,
-                        colors =
-                            OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceBright,
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceBright,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedBorderColor = Color.Transparent,
-                            ),
-                        trailingIcon = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(end = 4.dp),
-                            ) {
-                                IconButton(
-                                    onClick = sendMessage,
-                                    enabled = isTextInputEnabled && messageText.text.isNotBlank(),
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Send,
-                                        contentDescription =
-                                            stringResource(R.string.agent_demo_send),
-                                    )
-                                }
-                            }
-                        },
-                    )
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 16.dp)
+                                        .onPreviewKeyEvent { keyEvent ->
+                                            if (
+                                                (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter) &&
+                                                keyEvent.type == KeyEventType.KeyDown
+                                            ) {
+                                                sendMessage()
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        },
+                                enabled = isTextInputEnabled,
+                                shape = CircleShape,
+                                visualTransformation = visualTransformation,
+                                colors =
+                                    OutlinedTextFieldDefaults.colors(
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceBright,
+                                        focusedContainerColor = MaterialTheme.colorScheme.surfaceBright,
+                                        unfocusedBorderColor = Color.Transparent,
+                                        focusedBorderColor = Color.Transparent,
+                                    ),
+                                trailingIcon = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(end = 4.dp),
+                                    ) {
+                                        IconButton(
+                                            onClick = sendMessage,
+                                            enabled = isTextInputEnabled && messageText.text.isNotBlank(),
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                                contentDescription =
+                                                    stringResource(R.string.agent_demo_send),
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
 
                     if (showAutocomplete && filteredApps.isNotEmpty()) {
                         Popup(

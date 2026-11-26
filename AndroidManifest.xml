@@ -18,6 +18,7 @@
             android:name=".MainActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:label="@string/app_name"
+            android:windowSoftInputMode="stateAlwaysHidden"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
