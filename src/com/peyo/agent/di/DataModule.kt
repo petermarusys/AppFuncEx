@@ -1,0 +1,131 @@
+/*
+ * Copyright 2026 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.peyo.agent.di
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStore
+import androidx.room.Room
+import com.peyo.agent.data.ChatRepository
+import com.peyo.agent.data.DataStoreSettingsRepository
+import com.peyo.agent.data.FileDownloadHelper
+import com.peyo.agent.data.FileDownloadHelperImpl
+import com.peyo.agent.data.InMemoryPendingIntentRepository
+import com.peyo.agent.data.LlmProviderFactoryImpl
+import com.peyo.agent.data.PendingIntentRepository
+import com.peyo.agent.data.ResultImageReader
+import com.peyo.agent.data.ResultImageReaderImpl
+import com.peyo.agent.data.RoomChatRepository
+import com.peyo.agent.data.SettingsRepository
+import com.peyo.agent.data.db.AppDatabase
+import com.peyo.agent.data.db.dao.ChatDao
+import com.peyo.agent.domain.LlmProviderFactory
+import dagger.Binds
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.components.SingletonComponent
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.json.Json
+import javax.inject.Singleton
+
+val Context.settingsDataStore: DataStore<Preferences> by
+    preferencesDataStore(name = "settings")
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class DataModule {
+    @Binds
+    @Singleton
+    abstract fun bindSettingsRepository(impl: DataStoreSettingsRepository): SettingsRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindChatRepository(impl: RoomChatRepository): ChatRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPendingIntentRepository(impl: InMemoryPendingIntentRepository): PendingIntentRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindLlmProviderFactory(impl: LlmProviderFactoryImpl): LlmProviderFactory
+
+    @Binds
+    @Singleton
+    abstract fun bindFileDownloadHelper(impl: FileDownloadHelperImpl): FileDownloadHelper
+
+    @Binds
+    @Singleton
+    abstract fun bindResultImageReader(impl: ResultImageReaderImpl): ResultImageReader
+
+    companion object {
+        @Provides
+        @Singleton
+        fun provideDataStore(
+            @ApplicationContext context: Context,
+        ): DataStore<Preferences> {
+            return context.settingsDataStore
+        }
+
+        @Provides
+        @Singleton
+        fun provideAppDatabase(
+            @ApplicationContext context: Context,
+        ): AppDatabase {
+            return Room.databaseBuilder(
+                context,
+                AppDatabase::class.java,
+                "app_database",
+            )
+                .fallbackToDestructiveMigration()
+                .build()
+        }
+        @Provides
+        @Singleton
+        fun provideChatDao(db: AppDatabase): ChatDao {
+            return db.chatDao()
+        }
+
+        @Provides
+        @Singleton
+        fun provideHttpClient(): HttpClient {
+            return HttpClient(OkHttp) {
+                install(ContentNegotiation) {
+                    json(
+                        Json {
+                            ignoreUnknownKeys = true
+                            prettyPrint = true
+                            isLenient = true
+                        },
+                    )
+                }
+                install(HttpTimeout) { socketTimeoutMillis = SOCKET_TIMEOUT_MS }
+                install(WebSockets) { pingIntervalMillis = WEBSOCKET_PING_INTERVAL_MS }
+            }
+        }
+
+        private const val SOCKET_TIMEOUT_MS = 30_000L
+        private const val WEBSOCKET_PING_INTERVAL_MS = 20_000L
+    }
+}
