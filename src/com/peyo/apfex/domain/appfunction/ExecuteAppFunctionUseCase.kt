@@ -15,9 +15,7 @@
  */
 package com.peyo.apfex.domain.appfunction
 
-import android.app.AppInteractionAttribution
 import android.app.PendingIntent
-import android.os.Build
 import androidx.appfunctions.AppFunctionData
 import androidx.appfunctions.AppFunctionManager
 import androidx.appfunctions.ExecuteAppFunctionRequest
@@ -25,11 +23,8 @@ import androidx.appfunctions.ExecuteAppFunctionResponse
 import androidx.appfunctions.ExecuteAppFunctionResponse.Success.Companion.PROPERTY_RETURN_VALUE
 import androidx.appfunctions.metadata.AppFunctionMetadata
 import androidx.appfunctions.metadata.AppFunctionParcelableTypeMetadata
-import androidx.core.net.toUri
 import com.peyo.apfex.data.AgentInternalTools
 import com.peyo.apfex.data.db.entities.MessageAttachment
-import com.peyo.apfex.domain.appinteraction.StartAppInteractionSessionUseCase
-import dagger.Lazy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.SerializationException
@@ -51,8 +46,6 @@ class ExecuteAppFunctionUseCase
         private val agentInternalTools: AgentInternalTools,
         private val grantAppFunctionUriPermissionsUseCase: GrantAppFunctionUriPermissionsUseCase,
         private val getAppFunctionsUseCase: GetAppFunctionsUseCase,
-        // Lazy so that the API 37.2-only session classes are never instantiated on older devices.
-        private val startAppInteractionSessionUseCase: Lazy<StartAppInteractionSessionUseCase>,
     ) {
         /**
          * Executes the use case.
@@ -94,41 +87,17 @@ class ExecuteAppFunctionUseCase
             grantAppFunctionUriPermissionsUseCase(function, parameters)
 
             val request =
-                if (Build.VERSION.SDK_INT >= 37) {
-                    val uri = "appfunctions-agent://chat?threadId=$threadId".toUri()
-                    ExecuteAppFunctionRequest(
-                        targetPackageName = function.packageName,
-                        functionIdentifier = function.id,
-                        functionParameters = parameters,
-                        attribution =
-                            AppInteractionAttribution.Builder(
-                                AppInteractionAttribution.INTERACTION_TYPE_USER_QUERY,
-                            )
-                                .setInteractionUri(uri)
-                                .build(),
-                    )
-                } else {
-                    ExecuteAppFunctionRequest(
-                        targetPackageName = function.packageName,
-                        functionIdentifier = function.id,
-                        functionParameters = parameters,
-                    )
-                }
+                ExecuteAppFunctionRequest(
+                    targetPackageName = function.packageName,
+                    functionIdentifier = function.id,
+                    functionParameters = parameters,
+                )
 
             return try {
                 // Session acquisition is inside the try so that failures (e.g. the user denying
                 // consent) are reported back to the model as a tool error.
                 val response =
-                    if (Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.CINNAMON_BUN_2) {
-                        val session =
-                            startAppInteractionSessionUseCase.get()(
-                                threadId,
-                                listOf(function.packageName),
-                            )
-                        appFunctionManager.executeAppFunction(session, request)
-                    } else {
-                        appFunctionManager.executeAppFunction(request)
-                    }
+                    appFunctionManager.executeAppFunction(request)
                 when (response) {
                     is ExecuteAppFunctionResponse.Success -> {
                         val data = response.returnValue

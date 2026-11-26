@@ -19,9 +19,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
-import com.peyo.apfex.data.AppInteractionSessionRepository
 import com.peyo.apfex.data.DataStoreSettingsRepository
-import com.peyo.apfex.data.InMemoryAppInteractionSessionRepository
 import com.peyo.apfex.data.SettingsRepository
 import dagger.Binds
 import dagger.Module
@@ -40,12 +38,6 @@ abstract class DataModule {
     @Binds
     @Singleton
     abstract fun bindSettingsRepository(impl: DataStoreSettingsRepository): SettingsRepository
-
-    @Binds
-    @Singleton
-    abstract fun bindAppInteractionSessionRepository(
-        impl: InMemoryAppInteractionSessionRepository,
-    ): AppInteractionSessionRepository
 
     companion object {
         @Provides

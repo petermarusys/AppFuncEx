@@ -1,6 +1,6 @@
 # AppFuncEx (`com.peyo.apfex`) — UML Class & Sequence Diagrams
 
-This document describes the architecture, static structure (UML Class Diagrams), and runtime behavior (UML Sequence Diagrams) of **AppFuncEx**, an Android Jetpack Compose + Hilt application for discovering, inspecting, and executing Android **AppFunctions** (`androidx.appfunctions`) and managing `AppInteractionSession` flows.
+This document describes the architecture, static structure (UML Class Diagrams), and runtime behavior (UML Sequence Diagrams) of **AppFuncEx**, an Android Jetpack Compose + Hilt application (`minSdk = 36`, `compileSdk = 37`) for discovering, inspecting, and executing Android **AppFunctions** (`androidx.appfunctions:appfunctions:1.0.0`).
 
 ---
 
@@ -12,8 +12,8 @@ The application follows **Clean Architecture + MVVM** organized into four primar
 | :--- | :--- | :--- |
 | **Entry & DI** | `com.peyo.apfex`, `com.peyo.apfex.di` | Application bootstrap (`AppFunctionsApplication`), Activity host (`MainActivity`), privileged shell permission adoption (`ShellIdentityInstrumentation`), and Hilt bindings (`AppFunctionModule`, `DataModule`). |
 | **UI (Presentation)** | `com.peyo.apfex.ui.screens.debugging`, `com.peyo.apfex.ui.theme` | Unidirectional data flow via `DebuggingViewModel` + `DebuggingUiState`, searchable/pinnable app dropdown, dynamic recursive parameter editors (`AppFunctionDataTypeInput`), and JSON/error/PendingIntent result dialogs (`FunctionsFoundContent`). |
-| **Domain** | `com.peyo.apfex.domain.appfunction`, `com.peyo.apfex.domain.appinteraction`, `com.peyo.apfex.domain.pendingintent` | Stateless/reusable use cases for discovering installed apps and AppFunctions, checking enabled states, converting raw UI/LLM inputs into `AppFunctionData`, granting `content://` URI permissions, managing API 37.2 `AppInteractionSession`s + user consent, executing functions, formatting outputs/exceptions, and launching `PendingIntent`s. |
-| **Data** | `com.peyo.apfex.data`, `com.peyo.apfex.data.db.entities` | Jetpack DataStore settings (`SettingsRepository`), thread-scoped in-memory `AppInteractionSession` cache (`AppInteractionSessionRepository`), built-in agent tools & progressive tool disclosure (`AgentInternalTools`, `ToolDiscoveryTools`), and Room persistence entities (`ThreadEntity`, `MessageEntity`). |
+| **Domain** | `com.peyo.apfex.domain.appfunction`, `com.peyo.apfex.domain.pendingintent`, `com.peyo.apfex.domain.appinteraction` | Stateless/reusable use cases for discovering installed apps and AppFunctions, checking enabled states, converting raw UI/LLM inputs into `AppFunctionData`, granting `content://` URI permissions, executing functions directly via `AppFunctionManager`, formatting JSON outputs/exceptions, launching `PendingIntent`s, and a standalone consent `IntentSender` helper (`HandleUserConsentUseCase`). |
+| **Data** | `com.peyo.apfex.data`, `com.peyo.apfex.data.db.entities` | Jetpack DataStore settings (`SettingsRepository`, `DataStoreSettingsRepository`), built-in agent tools & progressive tool disclosure (`AgentInternalTools`, `ToolDiscoveryTools`), and Room persistence entities (`ThreadEntity`, `MessageEntity`). |
 
 ---
 
@@ -49,7 +49,6 @@ classDiagram
         class DataModule {
             <<HiltModule>>
             +bindSettingsRepository(impl) SettingsRepository*
-            +bindAppInteractionSessionRepository(impl) AppInteractionSessionRepository*
             +provideDataStore(context) DataStore~Preferences~
         }
     }
@@ -147,18 +146,13 @@ classDiagram
             +getAppFunctionException(throwable) AppFunctionException
         }
 
-        class StartAppInteractionSessionUseCase {
-            <<Singleton>>
-            +invoke(threadId, targetPackages) AppInteractionSession
+        class LaunchPendingIntentUseCase {
+            +invoke(pendingIntent) Result~Unit~
         }
 
         class HandleUserConsentUseCase {
             <<Singleton>>
             +invoke(intentSender)
-        }
-
-        class LaunchPendingIntentUseCase {
-            +invoke(pendingIntent) Result~Unit~
         }
     }
 
@@ -177,20 +171,6 @@ classDiagram
 
         class DataStoreSettingsRepository {
             -DataStore~Preferences~ dataStore
-        }
-
-        class AppInteractionSessionRepository {
-            <<interface>>
-            +saveSession(threadId, session)
-            +getSession(threadId) AppInteractionSession
-            +invalidateSession(threadId)
-        }
-
-        class InMemoryAppInteractionSessionRepository {
-            <<Singleton>>
-            -ConcurrentHashMap sessionMap
-            -ExecutorService executor
-            -LifecycleListener lifecycleListener
         }
 
         class AgentInternalTools {
@@ -241,17 +221,15 @@ classDiagram
     ExecuteAppFunctionUseCase --> ConvertAppFunctionDataToJsonUseCase : serializes return value
     ExecuteAppFunctionUseCase --> AgentInternalTools : routes internal tools
     ExecuteAppFunctionUseCase --> GetAppFunctionsUseCase : resolves connected apps for discovery
-    ExecuteAppFunctionUseCase --> StartAppInteractionSessionUseCase : Lazy acquisition on API 37.2+
-    StartAppInteractionSessionUseCase --> AppInteractionSessionRepository : caches session by threadId
-    StartAppInteractionSessionUseCase --> HandleUserConsentUseCase : launches consent IntentSender
 
     %% Data & DI relationships
     DataStoreSettingsRepository ..|> SettingsRepository
-    InMemoryAppInteractionSessionRepository ..|> AppInteractionSessionRepository
     AgentInternalTools --> ToolDiscoveryTools : delegates progressive disclosure
     DataModule ..> DataStoreSettingsRepository : binds
-    DataModule ..> InMemoryAppInteractionSessionRepository : binds
 ```
+
+> [!NOTE]
+> `HandleUserConsentUseCase` remains in `com.peyo.apfex.domain.appinteraction` as an `@Singleton` Hilt-injectable helper for launching consent `IntentSender`s, though it is currently unreferenced after removal of `StartAppInteractionSessionUseCase`.
 
 ---
 
@@ -480,7 +458,7 @@ classDiagram
 
 ### 3.1 Privileged App Launch & Shell Permission Adoption
 
-Launching `AppFuncEx` via [`startAppFunctionTestingAgent`](file:///home/hdyoon/ex/apfex/startAppFunctionTestingAgent) configures device allowlists and starts [`ShellIdentityInstrumentation`](file:///home/hdyoon/ex/apfex/src/com/peyo/apfex/ShellIdentityInstrumentation.kt) so the process holds `android.permission.EXECUTE_APP_FUNCTIONS`.
+Launching `AppFuncEx` via [`startAppFunctionTestingAgent`](file:///home/hdyoon/ex/apfex/startAppFunctionTestingAgent) checks the device SDK version (`ro.build.version.sdk`) for allowlist/AppOps setup and starts [`ShellIdentityInstrumentation`](file:///home/hdyoon/ex/apfex/src/com/peyo/apfex/ShellIdentityInstrumentation.kt) so the app process holds `android.permission.EXECUTE_APP_FUNCTIONS`.
 
 ```mermaid
 sequenceDiagram
@@ -495,14 +473,17 @@ sequenceDiagram
     Dev->>Script: ./startAppFunctionTestingAgent [-s SERIAL]
     Script->>ADB: pm list packages & dumpsys package com.peyo.apfex
     ADB-->>Script: Package signature fingerprint
+    Script->>ADB: getprop ro.build.version.sdk
+    ADB-->>Script: SDK_VERSION
 
-    opt SDK >= 37
-        Script->>ADB: cmd allowlist add-package-with-metadata-multimap (...)
-        Script->>ADB: cmd app_function flush-allowlist-changes
+    opt SDK_VERSION >= 37
+        Script->>ADB: cmd app_function purge-allowlist-cache (if supported)
+        Script->>ADB: cmd allowlist add-package-with-metadata-multimap / add-package-multimap
+        Script->>ADB: cmd app_function flush-allowlist-changes (if supported)
     end
 
-    opt SDK >= 35
-        Script->>ADB: cmd appops set com.android.shell (AUDIO ops) allow
+    opt SDK_VERSION >= 35
+        Script->>ADB: cmd appops set com.android.shell (TAKE_AUDIO_FOCUS, CONTROL_AUDIO, CONTROL_AUDIO_PARTIAL) allow
     end
 
     Script->>ADB: am force-stop com.peyo.apfex
@@ -590,9 +571,9 @@ sequenceDiagram
 
 ---
 
-### 3.3 External AppFunction Execution, User Consent & PendingIntent Flow
+### 3.3 External AppFunction Execution & PendingIntent Flow
 
-This sequence traces parameter input editing, conversion into `AppFunctionData`, `content://` URI permission granting, API 37.2 `AppInteractionSession` creation/updating (with `IntentSender` user consent), execution via `AppFunctionManager`, and handling `Data`, `PendingIntentAction`, or `Error` results.
+This sequence traces parameter input editing, conversion into `AppFunctionData`, recursive `content://` URI permission granting, direct execution via `AppFunctionManager.executeAppFunction(ExecuteAppFunctionRequest)` (with no `Build.VERSION` or `AppInteractionSession` branching), and handling `Data`, `PendingIntentAction`, or `Error` results.
 
 ```mermaid
 sequenceDiagram
@@ -603,10 +584,6 @@ sequenceDiagram
     participant ConvertIn as ConvertInputToAppFunctionDataUseCase
     participant ExecUC as ExecuteAppFunctionUseCase
     participant UriPermUC as GrantAppFunctionUriPermissionsUseCase
-    participant SessionUC as StartAppInteractionSessionUseCase
-    participant SessionRepo as AppInteractionSessionRepository
-    participant ConsentUC as HandleUserConsentUseCase
-    participant AIM as AppInteractionManager / Session
     participant AFM as AppFunctionManager
     participant ConvertOut as ConvertAppFunctionDataToJsonUseCase
     participant LaunchPI as LaunchPendingIntentUseCase
@@ -624,32 +601,8 @@ sequenceDiagram
     ExecUC->>UriPermUC: invoke(function, appFunctionData)
     UriPermUC->>UriPermUC: Recursively grant FLAG_GRANT_READ_URI_PERMISSION on content:// URIs
 
-    alt API >= 37.2 (CINNAMON_BUN_2)
-        ExecUC->>SessionUC: invoke("debugging-thread", [targetPackageName])
-        SessionUC->>SessionRepo: getSession("debugging-thread")
-        alt Session not cached
-            SessionUC->>AIM: createSession(CreateParams)
-            opt System requests user consent
-                AIM->>ConsentUC: onStartIntentSender(intentSender)
-                ConsentUC->>User: startIntentSender(FLAG_ACTIVITY_NEW_TASK)
-                User-->>AIM: Approve / Deny consent
-            end
-            AIM-->>SessionUC: AppInteractionSession
-            SessionUC->>SessionRepo: saveSession("debugging-thread", session)
-        else Session already cached
-            SessionUC->>AIM: session.update(UpdateParams)
-            opt Additional target package requires consent
-                AIM->>ConsentUC: onStartIntentSender(intentSender)
-                ConsentUC->>User: startIntentSender(FLAG_ACTIVITY_NEW_TASK)
-            end
-            AIM-->>SessionUC: Updated AppInteractionSession
-        end
-        SessionUC-->>ExecUC: Active AppInteractionSession
-        ExecUC->>AFM: executeAppFunction(session, request)
-    else API < 37.2
-        ExecUC->>AFM: executeAppFunction(request)
-    end
-
+    ExecUC->>ExecUC: Build ExecuteAppFunctionRequest(targetPackageName, functionIdentifier, functionParameters)
+    ExecUC->>AFM: executeAppFunction(request)
     AFM-->>ExecUC: ExecuteAppFunctionResponse
 
     alt ExecuteAppFunctionResponse.Success (Standard Data)
